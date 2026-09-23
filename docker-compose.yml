@@ -4,7 +4,7 @@ services:
     container_name: doi-fetcher
     volumes:
       - ./data/papers-data.json:/app/data/papers-data.json    # Mounts specified folder from path into ./data
-      - ./input.txt:/app/input.txt                            # Mounts the local input.txt
+      - ./input.csv:/app/input.csv                            # Mounts the local input.csv
     working_dir: /app
     stdin_open: true                         # Needed for nano
     tty: true                                # Allows interactive terminal usage

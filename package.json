@@ -2,7 +2,7 @@
   "name": "doi-fetcher",
   "version": "1.0.0",
   "type": "module",
-  "description": "fetches doi metadata from doi links provided in data/inout.txt and prepends it to the existing papers-data.json file",
+  "description": "fetches doi metadata from the dois and categories listed in input.csv and prepends it to the existing papers-data.json file",
   "main": "fetch-dois.js",
   "scripts": {
     "start": "./run.sh"

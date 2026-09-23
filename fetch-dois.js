@@ -1,14 +1,15 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { parseInputCsv } from './csv.js';
 
-const INPUT_PATH = path.join('input.txt');
+const INPUT_PATH = path.join('input.csv');
 const DATA_PATH = path.join('data', 'papers-data.json');
 
 const headers = {
   'User-Agent': 'doi-fetcher/1.0 (mailto:your@email.com)',
 };
 
-async function fetchPaperMetadata(doi) {
+async function fetchPaperMetadata(doi, categories) {
   const url = `https://api.crossref.org/works/${encodeURIComponent(doi)}`;
   try {
     const res = await fetch(url, { headers });
@@ -26,7 +27,8 @@ async function fetchPaperMetadata(doi) {
       year: item.issued?.['date-parts']?.[0]?.[0] || null,
       volume: item.volume || '',
       issue: item.issue || '',
-      pp: item.page || ''
+      pp: item.page || '',
+      categories
     };
   } catch (err) {
     console.warn(`❌  ${doi}  - failed due to crossref error: ${err.message}`);
@@ -34,18 +36,13 @@ async function fetchPaperMetadata(doi) {
   }
 }
 
-async function smartFetchMetadata(input) {
-  const trimmed = input.trim().replace(/\s+$/, '');
-  const doi = trimmed.replace(/^https?:\/\/(dx\.)?doi\.org\//, '');
-  return await fetchPaperMetadata(doi);
+function normalizeDoi(input) {
+  return input.trim().replace(/^https?:\/\/(dx\.)?doi\.org\//, '');
 }
 
-async function loadDOIsFromInput() {
+async function loadEntriesFromInput() {
   const raw = await fs.readFile(INPUT_PATH, 'utf8');
-  return raw
-    .split('\n')
-    .map(l => l.trim())
-    .filter(l => l.length);
+  return parseInputCsv(raw);
 }
 
 async function loadExistingMetadata() {
@@ -59,42 +56,51 @@ async function loadExistingMetadata() {
 }
 
 async function main() {
-  const inputDois = await loadDOIsFromInput();
+  const inputEntries = await loadEntriesFromInput();
   const existingData = await loadExistingMetadata();
   const existingDois = new Set(existingData.map(p => p.doi));
 
-  const seen = new Set();
-  const newDois = [];
+  const newEntries = new Map();   // doi -> Set of categories
 
-  for (const d of inputDois) {
-    const doi = d.replace(/^https?:\/\/(dx\.)?doi\.org\//, '');
+  for (const entry of inputEntries) {
+    const doi = normalizeDoi(entry.doi);
     if (existingDois.has(doi)) {
       console.log(`⚠️ Skipped  ${doi}  - already exists in data`)
-    } else if (seen.has(doi)) {
-      console.log(`⚠️ Skipped  ${doi}  - occurs multiple times in your input`)
+    } else if (newEntries.has(doi)) {
+      // same paper listed twice - keep it once, with the categories of both rows
+      const categories = newEntries.get(doi);
+      const added = entry.categories.filter(c => !categories.has(c));
+      added.forEach(c => categories.add(c));
+      console.log(`⚠️ Merged  ${doi}  - occurs multiple times in your input`
+        + (added.length ? ` (added categories: ${added.join(', ')})` : ''))
     }
     else {
-      seen.add(doi);
-      newDois.push(doi);
+      newEntries.set(doi, new Set(entry.categories));
     }
   }
 
-  if (newDois.length === 0) {
+  if (newEntries.size === 0) {
     console.log('⚠️ No new DOIs to add.');
     return;
   }
 
-  console.log(`\nFetching ${newDois.length} new papers...`);
+  console.log(`\nFetching ${newEntries.size} new papers...`);
 
   const newMetadata = [];
-  for (const doi of newDois) {
-    const meta = await smartFetchMetadata(doi);
+  for (const [doi, categories] of newEntries) {
+    const meta = await fetchPaperMetadata(doi, [...categories]);
     if (meta) newMetadata.push(meta);
   }
 
   if (newMetadata.length === 0) {
     console.log('⚠️ No new metadata could be fetched. Check your input');
     return;
+  }
+
+  const withoutCategories = newMetadata.filter(p => p.categories.length === 0);
+  if (withoutCategories.length) {
+    console.log(`\n⚠️ ${withoutCategories.length} paper(s) have no categories:`);
+    withoutCategories.forEach(p => console.log(`   ${p.doi}`));
   }
 
   const updated = [...newMetadata, ...existingData];
